@@ -5,11 +5,13 @@ import easyocr
 import asyncio
 import time
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession # <-- The new import
 
 # --- CONFIGURATION - Loaded from Railway Environment Variables ---
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
-SESSION_PATH = "/app/sessions/shakir.session"
+# This now reads your session string from the new environment variable
+SESSION_STRING = os.environ.get("TELETHON_SESSION")
 
 # The numeric IDs of the source and destination channels/groups
 SOURCE_CHAT_ID = int(os.environ.get("SOURCE_CHAT_ID"))
@@ -24,15 +26,16 @@ print("Initializing OCR Reader...")
 reader = easyocr.Reader(['en'])
 print("OCR Ready.")
 
-client = TelegramClient(SESSION_PATH, API_ID, API_HASH)
+# The client now uses the StringSession to log in
+client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 def get_template(lat, lon):
     """Creates the formatted text template."""
     current_date = time.strftime("%Y 年 %m 月 %d日")
     return f"""{current_date}
-员工姓名 Employee Name: shakir
-城市 City: Larkana
-经度Longitude: {lat}° N {lon}° E"""
+员工姓名 Employee Name；shakir
+城市 City :Larkana
+经度Longitude :{lat}° N {lon}° E"""
 
 def extract_coordinates(filepath):
     """Extracts Lat/Long from a single image file."""
@@ -67,6 +70,7 @@ async def handler(event):
     if event.message.photo:
         print(f"New image received from message ID: {event.message.id}")
         
+        temp_path = None # Define temp_path to avoid reference errors
         try:
             temp_path = await event.message.download_media()
             print(f"  -> Downloaded to: {temp_path}")
@@ -87,14 +91,17 @@ async def handler(event):
         except Exception as e:
             print(f"  -> Error processing message: {e}")
         finally:
-            if 'temp_path' in locals() and os.path.exists(temp_path):
+            if temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)
 
 async def main():
     print("Service starting...")
+    if not SESSION_STRING:
+        print("🛑 ERROR: TELETHON_SESSION environment variable not set. Please check Railway variables.")
+        return
+
     await client.start()
     print(f"✅ Service started. Listening for new images in Chat ID: {SOURCE_CHAT_ID}")
-    print("Service is running. Press Ctrl+C to stop.")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
