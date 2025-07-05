@@ -1,3 +1,6 @@
-telethon==1.32.1
-easyocr==1.7.0
-opencv-python-headless==4.8.1.78
+# This line forces pip to install the smaller, CPU-only version of torch
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+telethon
+easyocr
+opencv-python-headless
