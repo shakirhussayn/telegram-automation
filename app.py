@@ -6,55 +6,45 @@ import time
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# --- CONFIGURATION - Loaded from Railway Environment Variables ---
+# --- CONFIGURATION ---
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("TELETHON_SESSION")
 OCR_SPACE_API_KEY = os.environ.get("OCR_SPACE_API_KEY")
-EMPLOYEE_NAME = os.environ.get("EMPLOYEE_NAME", "shakir") # <-- New variable
+EMPLOYEE_NAME = os.environ.get("EMPLOYEE_NAME", "shakir")
 SOURCE_CHAT_ID = int(os.environ.get("SOURCE_CHAT_ID"))
 DESTINATION_CHAT_ID = int(os.environ.get("DESTINATION_CHAT_ID"))
 
-# --- STATEFUL COUNTER for Wall Stamps ---
 stamp_counter = 0
-
-# --- Client Initialization ---
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-
-# --- NEW HELPER FUNCTION for Coordinate Formatting ---
 def dd_to_dms(deg_str, is_lat):
     """Converts Decimal Degrees to Degrees, Minutes, Seconds format."""
-    deg = float(deg_str)
-    d = int(deg)
-    m_float = abs(deg - d) * 60
-    m = int(m_float)
-    s = (m_float - m) * 60
-    
-    if is_lat:
-        direction = 'N' if deg >= 0 else 'S'
-    else:
-        direction = 'E' if deg >= 0 else 'W'
+    try:
+        deg = float(deg_str)
+        d = int(deg)
+        m_float = abs(deg - d) * 60
+        m = int(m_float)
+        s = (m_float - m) * 60
         
-    return f'{abs(d)}°{m}\'{s:.1f}"{direction}'
+        if is_lat:
+            direction = 'N' if deg >= 0 else 'S'
+        else:
+            direction = 'E' if deg >= 0 else 'W'
+            
+        return f'{abs(d)}°{m}\'{s:.1f}"{direction}'
+    except (ValueError, TypeError):
+        return "Invalid Coordinate"
 
-
-def get_template(lat_dd, lon_dd, date_str, stamp_num, employee_name):
-    """Creates the formatted text template with all new requirements."""
-    # Convert decimal degrees to DMS format
+def get_template(lat_dd, lon_dd, stamp_num, employee_name):
+    """Creates the formatted text template (using a static date)."""
     lat_dms = dd_to_dms(lat_dd, is_lat=True)
     lon_dms = dd_to_dms(lon_dd, is_lat=False)
     
-    # Reformat date from MM/DD/YYYY to YYYY 年 MM 月 DD日
-    try:
-        # Assumes date is in MM/DD/YYYY format from OCR
-        m, d, y = date_str.split('/')
-        formatted_date = f"{y} 年 {m} 月 {d}日"
-    except:
-        # Fallback if date format is unexpected
-        formatted_date = date_str
+    # Using a static date for now to isolate the coordinate issue
+    static_date = "2025 年 07 月 06日"
 
-    return f"""{formatted_date}
+    return f"""{static_date}
 序号 sort no：1
 员工姓名 Employee Name；{employee_name}
 墙上印章数量 Number of wall stamps ; {stamp_num}
@@ -63,7 +53,7 @@ def get_template(lat_dd, lon_dd, date_str, stamp_num, employee_name):
 """
 
 def extract_data(filepath):
-    """Extracts Lat, Long, and Date with more specific regex for GPS Map Camera."""
+    """Extracts only Lat and Long from the image via ocr.space API."""
     try:
         with open(filepath, 'rb') as f:
             response = requests.post(
@@ -76,28 +66,24 @@ def extract_data(filepath):
 
         if result.get('IsErroredOnProcessing'):
             print(f"  -> OCR API Error: {result.get('ErrorMessage')}")
-            return None, None, None
+            return None, None
 
         ocr_text = result['ParsedResults'][0]['ParsedText']
         print(f"  -> Raw OCR Text: {ocr_text}")
 
-        # More specific regex to capture the exact number format after "Lat " and "Long "
         lat_match = re.search(r"Lat\s+([+-]?\d{1,3}\.\d+)", ocr_text, re.IGNORECASE)
-        long_match = re.search(r"Long\s+([+-]?\d{1,3}\.\d+)", ocr_text, re.IGNORECASE)
-        date_match = re.search(r"(\d{2}/\d{2}/\d{4})", ocr_text)
+        lon_match = re.search(r"Long\s+([+-]?\d{1,3}\.\d+)", ocr_text, re.IGNORECASE)
 
         lat = lat_match.group(1).removesuffix('0') if lat_match and lat_match.group(1) else None
         lon = long_match.group(1).removesuffix('0') if long_match and long_match.group(1) else None
-        date = date_match.group(1) if date_match else "Unknown Date"
-
-        print(f"  -> Extracted Raw Lat: {lat}, Long: {lon}, Date: {date}")
-
-        return lat, lon, date
+        
+        print(f"  -> Extracted Raw Lat: {lat}, Long: {lon}")
+        return lat, lon
 
     except Exception as e:
         print(f"  -> Error calling OCR API or processing result: {e}")
-        return None, None, None
-        
+        return None, None
+
 @client.on(events.NewMessage(chats=SOURCE_CHAT_ID))
 async def handler(event):
     global stamp_counter
@@ -106,16 +92,14 @@ async def handler(event):
         temp_path = None
         try:
             temp_path = await event.message.download_media()
-            latitude, longitude, date = extract_data(temp_path)
+            latitude, longitude = extract_data(temp_path)
             
-            if not all([latitude, longitude, date]):
-                print("  -> Could not extract all required data. Skipping.")
+            if not all([latitude, longitude]):
+                print("  -> Could not extract valid coordinates. Skipping.")
                 return
 
-            # Increment the counter for this image
             stamp_counter += 1
-            
-            template_text = get_template(latitude, longitude, date, stamp_counter, EMPLOYEE_NAME)
+            template_text = get_template(latitude, longitude, stamp_counter, EMPLOYEE_NAME)
             await client.send_file(DESTINATION_CHAT_ID, temp_path, caption=template_text)
             print(f"  -> ✅ Successfully posted. (Stamp #{stamp_counter})")
         except Exception as e:
@@ -125,7 +109,8 @@ async def handler(event):
                 os.remove(temp_path)
 
 async def main():
-    if not all([SESSION_STRING, API_ID, API_HASH, OCR_SPACE_API_KEY, SOURCE_CHAT_ID, DESTINATION_CHAT_ID, EMPLOYEE_NAME]):
+    required_vars = ["API_ID", "API_HASH", "TELETHON_SESSION", "OCR_SPACE_API_KEY", "EMPLOYEE_NAME", "SOURCE_CHAT_ID", "DESTINATION_CHAT_ID"]
+    if not all(os.environ.get(var) for var in required_vars):
         print("🛑 ERROR: One or more required environment variables are missing.")
         return
         
