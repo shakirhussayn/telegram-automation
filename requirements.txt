@@ -1,6 +1,2 @@
-# This line forces pip to install the smaller, CPU-only version of torch
---extra-index-url https://download.pytorch.org/whl/cpu
-
 telethon
-easyocr
-opencv-python-headless
+requests
