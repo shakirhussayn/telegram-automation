@@ -70,12 +70,17 @@ def extract_data(filepath):
 
         ocr_text = result['ParsedResults'][0]['ParsedText']
         print(f"  -> Raw OCR Text: {ocr_text}")
-
+        
+        ## --- THIS IS THE CRITICAL SECTION THAT FIXES THE ERROR --- ##
+        # The next two lines DEFINE the variables. They must come first.
         lat_match = re.search(r"Lat\s+([+-]?\d{1,3}\.\d+)", ocr_text, re.IGNORECASE)
         lon_match = re.search(r"Long\s+([+-]?\d{1,3}\.\d+)", ocr_text, re.IGNORECASE)
 
+        # The next two lines USE the variables. They must come after.
+        # This structure prevents the 'not defined' error.
         lat = lat_match.group(1).removesuffix('0') if lat_match and lat_match.group(1) else None
-        lon = long_match.group(1).removesuffix('0') if long_match and long_match.group(1) else None
+        lon = lon_match.group(1).removesuffix('0') if lon_match and lon_match.group(1) else None
+        ## -------------------------------------------------------- ##
         
         print(f"  -> Extracted Raw Lat: {lat}, Long: {lon}")
         return lat, lon
