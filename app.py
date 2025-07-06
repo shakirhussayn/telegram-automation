@@ -1,6 +1,6 @@
 import os
 import re
-import requests # <-- New import for making API calls
+import requests
 import asyncio
 import time
 from telethon import TelegramClient, events
@@ -10,89 +10,111 @@ from telethon.sessions import StringSession
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("TELETHON_SESSION")
-OCR_SPACE_API_KEY = os.environ.get("OCR_SPACE_API_KEY") # <-- Your new API key
-
-# The numeric IDs of the source and destination channels/groups
+OCR_SPACE_API_KEY = os.environ.get("OCR_SPACE_API_KEY")
+EMPLOYEE_NAME = os.environ.get("EMPLOYEE_NAME", "shakir") # <-- New variable
 SOURCE_CHAT_ID = int(os.environ.get("SOURCE_CHAT_ID"))
 DESTINATION_CHAT_ID = int(os.environ.get("DESTINATION_CHAT_ID"))
+
+# --- STATEFUL COUNTER for Wall Stamps ---
+stamp_counter = 0
 
 # --- Client Initialization ---
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-def get_template(lat, lon):
-    """Creates the formatted text template."""
-    current_date = time.strftime("%Y 年 %m 月 %d日")
-    return f"""
-{current_date}
-员工姓名 Employee Name；shakir
+
+# --- NEW HELPER FUNCTION for Coordinate Formatting ---
+def dd_to_dms(deg_str, is_lat):
+    """Converts Decimal Degrees to Degrees, Minutes, Seconds format."""
+    deg = float(deg_str)
+    d = int(deg)
+    m_float = abs(deg - d) * 60
+    m = int(m_float)
+    s = (m_float - m) * 60
+    
+    if is_lat:
+        direction = 'N' if deg >= 0 else 'S'
+    else:
+        direction = 'E' if deg >= 0 else 'W'
+        
+    return f'{abs(d)}°{m}\'{s:.1f}"{direction}'
+
+
+def get_template(lat_dd, lon_dd, date_str, stamp_num, employee_name):
+    """Creates the formatted text template with all new requirements."""
+    # Convert decimal degrees to DMS format
+    lat_dms = dd_to_dms(lat_dd, is_lat=True)
+    lon_dms = dd_to_dms(lon_dd, is_lat=False)
+    
+    # Reformat date from MM/DD/YYYY to YYYY 年 MM 月 DD日
+    try:
+        # Assumes date is in MM/DD/YYYY format from OCR
+        m, d, y = date_str.split('/')
+        formatted_date = f"{y} 年 {m} 月 {d}日"
+    except:
+        # Fallback if date format is unexpected
+        formatted_date = date_str
+
+    return f"""{formatted_date}
+序号 sort no：1
+员工姓名 Employee Name；{employee_name}
+墙上印章数量 Number of wall stamps ; {stamp_num}
 城市 City :Larkana
-经度Longitude :{lat}° N {lon}° E
+经度Longitude :{lat_dms} {lon_dms}
 """
 
-def extract_coordinates(filepath):
-    """
-    Extracts Lat/Long by sending the image to the ocr.space API.
-    This is much faster than running a local model.
-    """
-    if not OCR_SPACE_API_KEY:
-        print("  -> ERROR: OCR_SPACE_API_KEY environment variable is not set.")
-        return "Error", "Error"
-        
+def extract_data(filepath):
+    """Extracts Lat, Long, and Date by sending the image to the ocr.space API."""
     try:
         with open(filepath, 'rb') as f:
-            # Send the image file to the API
             response = requests.post(
                 'https://api.ocr.space/parse/image',
                 headers={'apikey': OCR_SPACE_API_KEY},
                 files={'file': f}
             )
-        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
-        
+        response.raise_for_status()
         result = response.json()
-        print(f"  -> API Response: {result}")
-        
-        if result.get('IsErroredOnProcessing'):
-            print(f"  -> OCR API Error: {result.get('ErrorMessage')}")
-            return "Error", "Error"
 
-        # 1. Get the full block of text from the API response
+        if result.get('IsErroredOnProcessing'):
+            return None, None, None
+
         ocr_text = result['ParsedResults'][0]['ParsedText']
         
-        # 2. Find the numbers associated with Lat and Long
+        # Extract Lat/Lon
         lat_match = re.search(r"Lat\s+([\d\.]+)", ocr_text, re.IGNORECASE)
-        long_match = re.search(r"Long\s+([\d\.]+)", ocr_text, re.IGNORECASE)
-        
-        if lat_match and long_match:
-            raw_lat = lat_match.group(1)
-            raw_lon = long_match.group(1)
+        lon_match = re.search(r"Long\s+([\d\.]+)", ocr_text, re.IGNORECASE)
+        # Extract Date
+        date_match = re.search(r"(\d{2}/\d{2}/\d{4})", ocr_text)
 
-            # 3. Clean the data by removing the trailing '0' from the misread degree symbol
-            clean_lat = raw_lat.removesuffix('0')
-            clean_lon = raw_lon.removesuffix('0')
-            
-            print(f"  -> Extracted coordinates: Lat={clean_lat}, Long={clean_lon}")
-            return clean_lat, clean_lon
-        else:
-            print("  -> Could not find Lat/Long in OCR text.")
-            return "Not Found", "Not Found"
+        lat = lat_match.group(1).removesuffix('0') if lat_match else None
+        lon = lon_match.group(1).removesuffix('0') if long_match else None
+        date = date_match.group(1) if date_match else "Unknown Date"
+        
+        return lat, lon, date
             
     except Exception as e:
         print(f"  -> Error calling OCR API or processing result: {e}")
-        return "Error", "Error"
+        return None, None, None
 
 @client.on(events.NewMessage(chats=SOURCE_CHAT_ID))
 async def handler(event):
+    global stamp_counter
     if event.message.photo:
         print(f"New image received from message ID: {event.message.id}")
         temp_path = None
         try:
             temp_path = await event.message.download_media()
-            latitude, longitude = extract_coordinates(temp_path)
-            if latitude in ["Not Found", "Error"]:
+            latitude, longitude, date = extract_data(temp_path)
+            
+            if not all([latitude, longitude, date]):
+                print("  -> Could not extract all required data. Skipping.")
                 return
-            template_text = get_template(latitude, longitude)
+
+            # Increment the counter for this image
+            stamp_counter += 1
+            
+            template_text = get_template(latitude, longitude, date, stamp_counter, EMPLOYEE_NAME)
             await client.send_file(DESTINATION_CHAT_ID, temp_path, caption=template_text)
-            print("  -> ✅ Successfully posted.")
+            print(f"  -> ✅ Successfully posted. (Stamp #{stamp_counter})")
         except Exception as e:
             print(f"  -> Top-level error in handler: {e}")
         finally:
@@ -100,7 +122,7 @@ async def handler(event):
                 os.remove(temp_path)
 
 async def main():
-    if not all([SESSION_STRING, API_ID, API_HASH, OCR_SPACE_API_KEY, SOURCE_CHAT_ID, DESTINATION_CHAT_ID]):
+    if not all([SESSION_STRING, API_ID, API_HASH, OCR_SPACE_API_KEY, SOURCE_CHAT_ID, DESTINATION_CHAT_ID, EMPLOYEE_NAME]):
         print("🛑 ERROR: One or more required environment variables are missing.")
         return
         
