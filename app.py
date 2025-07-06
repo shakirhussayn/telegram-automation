@@ -63,7 +63,7 @@ def get_template(lat_dd, lon_dd, date_str, stamp_num, employee_name):
 """
 
 def extract_data(filepath):
-    """Extracts Lat, Long, and Date by sending the image to the ocr.space API."""
+    """Extracts Lat, Long, and Date with more specific regex for GPS Map Camera."""
     try:
         with open(filepath, 'rb') as f:
             response = requests.post(
@@ -79,19 +79,21 @@ def extract_data(filepath):
             return None, None, None
 
         ocr_text = result['ParsedResults'][0]['ParsedText']
-        
-        # Define all the search patterns first
-        lat_match = re.search(r"Lat\s+([\d\.]+)", ocr_text, re.IGNORECASE)
-        lon_match = re.search(r"Long\s+([\d\.]+)", ocr_text, re.IGNORECASE)
+        print(f"  -> Raw OCR Text: {ocr_text}")
+
+        # More specific regex to capture the exact number format after "Lat " and "Long "
+        lat_match = re.search(r"Lat\s+([+-]?\d{1,3}\.\d+)", ocr_text, re.IGNORECASE)
+        long_match = re.search(r"Long\s+([+-]?\d{1,3}\.\d+)", ocr_text, re.IGNORECASE)
         date_match = re.search(r"(\d{2}/\d{2}/\d{4})", ocr_text)
 
-        # Then, use them to get the values
-        lat = lat_match.group(1).removesuffix('0') if lat_match else None
-        lon = lon_match.group(1).removesuffix('0') if lon_match else None
+        lat = lat_match.group(1).removesuffix('0') if lat_match and lat_match.group(1) else None
+        lon = long_match.group(1).removesuffix('0') if long_match and long_match.group(1) else None
         date = date_match.group(1) if date_match else "Unknown Date"
-        
+
+        print(f"  -> Extracted Raw Lat: {lat}, Long: {lon}, Date: {date}")
+
         return lat, lon, date
-            
+
     except Exception as e:
         print(f"  -> Error calling OCR API or processing result: {e}")
         return None, None, None
