@@ -75,18 +75,19 @@ def extract_data(filepath):
         result = response.json()
 
         if result.get('IsErroredOnProcessing'):
+            print(f"  -> OCR API Error: {result.get('ErrorMessage')}")
             return None, None, None
 
         ocr_text = result['ParsedResults'][0]['ParsedText']
         
-        # Extract Lat/Lon
+        # Define all the search patterns first
         lat_match = re.search(r"Lat\s+([\d\.]+)", ocr_text, re.IGNORECASE)
         lon_match = re.search(r"Long\s+([\d\.]+)", ocr_text, re.IGNORECASE)
-        # Extract Date
         date_match = re.search(r"(\d{2}/\d{2}/\d{4})", ocr_text)
 
+        # Then, use them to get the values
         lat = lat_match.group(1).removesuffix('0') if lat_match else None
-        lon = lon_match.group(1).removesuffix('0') if long_match else None
+        lon = lon_match.group(1).removesuffix('0') if lon_match else None
         date = date_match.group(1) if date_match else "Unknown Date"
         
         return lat, lon, date
@@ -94,7 +95,7 @@ def extract_data(filepath):
     except Exception as e:
         print(f"  -> Error calling OCR API or processing result: {e}")
         return None, None, None
-
+        
 @client.on(events.NewMessage(chats=SOURCE_CHAT_ID))
 async def handler(event):
     global stamp_counter
