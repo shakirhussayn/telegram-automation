@@ -5,12 +5,11 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
 # --- CONFIGURATION - Loaded from Railway Environment Variables ---
-# These act as the default startup values
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("TELETHON_SESSION")
 
-# New variables for the template
+# Template variables loaded from Railway
 DATE = os.environ.get("DATE", "Not Set")
 STAFF_NAME = os.environ.get("STAFF_NAME", "Not Set")
 PHOTO_LOCATION = os.environ.get("PHOTO_LOCATION", "Not Set")
@@ -23,6 +22,7 @@ DESTINATION_CHAT_ID = int(os.environ.get("DESTINATION_CHAT_ID"))
 
 # --- STATEFUL COUNTERS ---
 # These are initialized from the Railway variables
+# `daily_counter` is now only changed via the /set command
 daily_counter = START_DAILY_NUM
 history_counter = START_HISTORY_NUM
 
@@ -43,13 +43,13 @@ async def handler(event):
     global daily_counter, history_counter
     global DATE, STAFF_NAME, PHOTO_LOCATION
 
-    # --- NEW: Command Handling Logic ---
+    # --- Command Handling Logic ---
     if event.message.text and event.message.text.startswith('/set'):
         command_text = event.message.text.strip()
         parts = command_text.split('=', 1)
         if len(parts) == 2:
             key_part, new_value = parts
-            key = key_part.split(' ', 1)[1].upper() # Get the variable name like "STAFF_NAME"
+            key = key_part.split(' ', 1)[1].upper()
             
             updated = False
             if key == "STAFF_NAME":
@@ -74,9 +74,9 @@ async def handler(event):
                 await event.reply(f'❌ Unknown setting: {key}')
         return
 
-    # --- Existing Photo Handling Logic ---
+    # --- Photo Handling Logic ---
     if event.message.photo:
-        print(f"Image received. Preparing post #{daily_counter}...")
+        print(f"Image received. Preparing post with History #{history_counter}...")
         
         template_text = get_template(
             DATE,
@@ -94,7 +94,7 @@ async def handler(event):
         
         print(f"  -> ✅ Successfully posted History #{history_counter}.")
         
-        daily_counter += 1
+        # ** FIX: Only the history_counter is incremented **
         history_counter += 1
         
         delay = random.randint(5, 10)
@@ -102,9 +102,10 @@ async def handler(event):
         await asyncio.sleep(delay)
 
 async def main():
-    required_vars = ["API_ID", "API_HASH", "TELETHON_SESSION", "SOURCE_CHAT_ID", "DESTINATION_CHAT_ID"]
+    required_vars = ["API_ID", "API_HASH", "TELETHON_SESSION", "SOURCE_CHAT_ID", 
+                     "DESTINATION_CHAT_ID", "DATE", "STAFF_NAME", "PHOTO_LOCATION"]
     if not all(os.environ.get(var) for var in required_vars):
-        print("🛑 ERROR: One or more critical environment variables are missing.")
+        print("🛑 ERROR: One or more required environment variables are missing.")
         return
         
     print("Service starting with the following default data:")
