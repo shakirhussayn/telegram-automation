@@ -1,127 +1,120 @@
 import os
-import re
-import requests
 import asyncio
-import time
+import random
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION - Loaded from Railway Environment Variables ---
+# These act as the default startup values
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("TELETHON_SESSION")
-OCR_SPACE_API_KEY = os.environ.get("OCR_SPACE_API_KEY")
-EMPLOYEE_NAME = os.environ.get("EMPLOYEE_NAME", "shakir")
+
+# New variables for the template
+DATE = os.environ.get("DATE", "Not Set")
+STAFF_NAME = os.environ.get("STAFF_NAME", "Not Set")
+PHOTO_LOCATION = os.environ.get("PHOTO_LOCATION", "Not Set")
+START_DAILY_NUM = int(os.environ.get("START_DAILY_NUM", 1))
+START_HISTORY_NUM = int(os.environ.get("START_HISTORY_NUM", 1))
+
+# Telegram Channel/Group IDs
 SOURCE_CHAT_ID = int(os.environ.get("SOURCE_CHAT_ID"))
 DESTINATION_CHAT_ID = int(os.environ.get("DESTINATION_CHAT_ID"))
 
-stamp_counter = 0
+# --- STATEFUL COUNTERS ---
+# These are initialized from the Railway variables
+daily_counter = START_DAILY_NUM
+history_counter = START_HISTORY_NUM
+
+# --- TELEGRAM CLIENT ---
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-def dd_to_dms(deg_str, is_lat):
-    """Converts Decimal Degrees to Degrees, Minutes, Seconds format."""
-    try:
-        deg = float(deg_str)
-        d = int(deg)
-        m_float = abs(deg - d) * 60
-        m = int(m_float)
-        s = (m_float - m) * 60
-        
-        if is_lat:
-            direction = 'N' if deg >= 0 else 'S'
-        else:
-            direction = 'E' if deg >= 0 else 'W'
-            
-        return f'{abs(d)}°{m}\'{s:.1f}"{direction}'
-    except (ValueError, TypeError):
-        return "Invalid Coordinate"
-
-def get_template(lat_dd, lon_dd, stamp_num, employee_name):
-    """Creates the formatted text template (using a static date)."""
-    lat_dms = dd_to_dms(lat_dd, is_lat=True)
-    lon_dms = dd_to_dms(lon_dd, is_lat=False)
-    
-    # Using a static date for now to isolate the coordinate issue
-    static_date = "2025 年 07 月 06日"
-
-    return f"""{static_date}
-序号 sort no：1
-员工姓名 Employee Name；{employee_name}
-墙上印章数量 Number of wall stamps ; {stamp_num}
-城市 City :Larkana
-经度Longitude :{lat_dms} {lon_dms}
+def get_template(date, staff_name, daily_num, history_num, location):
+    """Creates the new formatted text template."""
+    return f"""DATE : {date}
+工作员工姓名 STAFF NAME : {staff_name}
+当日编号 NUMBER OF THE DAY: {daily_num}
+历史编号 HISTORY NUMBER : {history_num}
+照片所在地区 PHOTO LOCATION: {location}
 """
-
-def extract_data(filepath):
-    """Extracts only Lat and Long from the image via ocr.space API."""
-    try:
-        with open(filepath, 'rb') as f:
-            response = requests.post(
-                'https://api.ocr.space/parse/image',
-                headers={'apikey': OCR_SPACE_API_KEY},
-                files={'file': f}
-            )
-        response.raise_for_status()
-        result = response.json()
-
-        if result.get('IsErroredOnProcessing'):
-            print(f"  -> OCR API Error: {result.get('ErrorMessage')}")
-            return None, None
-
-        ocr_text = result['ParsedResults'][0]['ParsedText']
-        print(f"  -> Raw OCR Text: {ocr_text}")
-        
-        ## --- THIS IS THE CRITICAL SECTION THAT FIXES THE ERROR --- ##
-        # The next two lines DEFINE the variables. They must come first.
-        lat_match = re.search(r"Lat\s+([+-]?\d{1,3}\.\d+)", ocr_text, re.IGNORECASE)
-        lon_match = re.search(r"Long\s+([+-]?\d{1,3}\.\d+)", ocr_text, re.IGNORECASE)
-
-        # The next two lines USE the variables. They must come after.
-        # This structure prevents the 'not defined' error.
-        lat = lat_match.group(1).removesuffix('0') if lat_match and lat_match.group(1) else None
-        lon = lon_match.group(1).removesuffix('0') if lon_match and lon_match.group(1) else None
-        ## -------------------------------------------------------- ##
-        
-        print(f"  -> Extracted Raw Lat: {lat}, Long: {lon}")
-        return lat, lon
-
-    except Exception as e:
-        print(f"  -> Error calling OCR API or processing result: {e}")
-        return None, None
 
 @client.on(events.NewMessage(chats=SOURCE_CHAT_ID))
 async def handler(event):
-    global stamp_counter
-    if event.message.photo:
-        print(f"New image received from message ID: {event.message.id}")
-        temp_path = None
-        try:
-            temp_path = await event.message.download_media()
-            latitude, longitude = extract_data(temp_path)
-            
-            if not all([latitude, longitude]):
-                print("  -> Could not extract valid coordinates. Skipping.")
-                return
+    global daily_counter, history_counter
+    global DATE, STAFF_NAME, PHOTO_LOCATION
 
-            stamp_counter += 1
-            template_text = get_template(latitude, longitude, stamp_counter, EMPLOYEE_NAME)
-            await client.send_file(DESTINATION_CHAT_ID, temp_path, caption=template_text)
-            print(f"  -> ✅ Successfully posted. (Stamp #{stamp_counter})")
-        except Exception as e:
-            print(f"  -> Top-level error in handler: {e}")
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
+    # --- NEW: Command Handling Logic ---
+    if event.message.text and event.message.text.startswith('/set'):
+        command_text = event.message.text.strip()
+        parts = command_text.split('=', 1)
+        if len(parts) == 2:
+            key_part, new_value = parts
+            key = key_part.split(' ', 1)[1].upper() # Get the variable name like "STAFF_NAME"
+            
+            updated = False
+            if key == "STAFF_NAME":
+                STAFF_NAME = new_value.strip()
+                updated = True
+            elif key == "DATE":
+                DATE = new_value.strip()
+                updated = True
+            elif key == "PHOTO_LOCATION":
+                PHOTO_LOCATION = new_value.strip()
+                updated = True
+            elif key == "START_DAILY_NUM":
+                daily_counter = int(new_value.strip())
+                updated = True
+            elif key == "START_HISTORY_NUM":
+                history_counter = int(new_value.strip())
+                updated = True
+            
+            if updated:
+                await event.reply(f'✅ Setting updated: {key} is now "{new_value.strip()}"')
+            else:
+                await event.reply(f'❌ Unknown setting: {key}')
+        return
+
+    # --- Existing Photo Handling Logic ---
+    if event.message.photo:
+        print(f"Image received. Preparing post #{daily_counter}...")
+        
+        template_text = get_template(
+            DATE,
+            STAFF_NAME,
+            daily_counter,
+            history_counter,
+            PHOTO_LOCATION
+        )
+        
+        await client.send_file(
+            DESTINATION_CHAT_ID,
+            event.message.photo,
+            caption=template_text
+        )
+        
+        print(f"  -> ✅ Successfully posted History #{history_counter}.")
+        
+        daily_counter += 1
+        history_counter += 1
+        
+        delay = random.randint(5, 10)
+        print(f"  -> Waiting for {delay} seconds...")
+        await asyncio.sleep(delay)
 
 async def main():
-    required_vars = ["API_ID", "API_HASH", "TELETHON_SESSION", "OCR_SPACE_API_KEY", "EMPLOYEE_NAME", "SOURCE_CHAT_ID", "DESTINATION_CHAT_ID"]
+    required_vars = ["API_ID", "API_HASH", "TELETHON_SESSION", "SOURCE_CHAT_ID", "DESTINATION_CHAT_ID"]
     if not all(os.environ.get(var) for var in required_vars):
-        print("🛑 ERROR: One or more required environment variables are missing.")
+        print("🛑 ERROR: One or more critical environment variables are missing.")
         return
         
-    print("Service starting...")
+    print("Service starting with the following default data:")
+    print(f"  -> Date: {DATE}")
+    print(f"  -> Staff: {STAFF_NAME}")
+    print(f"  -> Location: {PHOTO_LOCATION}")
+    print(f"  -> Starting Numbers: Daily={daily_counter}, History={history_counter}")
+    
     await client.start()
-    print(f"✅ Service started. Listening for new images in Chat ID: {SOURCE_CHAT_ID}")
+    print(f"✅ Service started. Listening for messages in Chat ID: {SOURCE_CHAT_ID}")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
