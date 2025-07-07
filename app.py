@@ -1,12 +1,13 @@
 import os
-import asyncio # <-- Required for the lock
+import asyncio
 import random
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# --- CONFIGURATION ---
+# --- CONFIGURATION - Loaded from Railway Environment Variables ---
 API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASHSESSION_STRING = os.environ.get("TELETHON_SESSION")
+API_HASH = os.environ.get("API_HASH")
+SESSION_STRING = os.environ.get("TELETHON_SESSION")
 
 # Template variables loaded from Railway
 DATE = os.environ.get("DATE", "Not Set")
@@ -25,7 +26,7 @@ history_counter = START_HISTORY_NUM
 
 # --- TELEGRAM CLIENT & LOCK ---
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-lock = asyncio.Lock() # <-- The new lock to ensure sequential processing
+lock = asyncio.Lock()
 
 def get_template(date, staff_name, daily_num, history_num, location):
     """Creates the new formatted text template."""
@@ -43,8 +44,7 @@ async def handler(event):
 
     # --- Command Handling Logic ---
     if event.message.text and event.message.text.startswith('/set'):
-        # This part remains the same
-        async with lock: # Also lock command processing to be safe
+        async with lock:
             command_text = event.message.text.strip()
             parts = command_text.split('=', 1)
             if len(parts) == 2:
@@ -71,7 +71,6 @@ async def handler(event):
 
     # --- Photo Handling Logic ---
     if event.message.photo:
-        # The 'async with lock:' ensures only one photo is processed at a time
         async with lock:
             print(f"--- LOCK ACQUIRED: Processing History #{history_counter} ---")
             
@@ -100,14 +99,18 @@ async def handler(event):
 
 
 async def main():
-    # This part remains the same
     required_vars = ["API_ID", "API_HASH", "TELETHON_SESSION", "SOURCE_CHAT_ID", 
                      "DESTINATION_CHAT_ID", "DATE", "STAFF_NAME", "PHOTO_LOCATION"]
     if not all(os.environ.get(var) for var in required_vars):
         print("🛑 ERROR: One or more required environment variables are missing.")
         return
         
-    print("Service starting...")
+    print("Service starting with the following default data:")
+    print(f"  -> Date: {DATE}")
+    print(f"  -> Staff: {STAFF_NAME}")
+    print(f"  -> Location: {PHOTO_LOCATION}")
+    print(f"  -> Starting Numbers: Daily={daily_counter}, History={history_counter}")
+    
     await client.start()
     print(f"✅ Service started. Listening for messages in Chat ID: {SOURCE_CHAT_ID}")
     await client.run_until_disconnected()
