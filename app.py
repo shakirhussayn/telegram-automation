@@ -13,7 +13,6 @@ SESSION_STRING = os.environ.get("TELETHON_SESSION")
 DATE = os.environ.get("DATE", "Not Set")
 STAFF_NAME = os.environ.get("STAFF_NAME", "Not Set")
 PHOTO_LOCATION = os.environ.get("PHOTO_LOCATION", "Not Set")
-START_DAILY_NUM = int(os.environ.get("START_DAILY_NUM", 1))
 START_HISTORY_NUM = int(os.environ.get("START_HISTORY_NUM", 1))
 
 # Telegram Channel/Group IDs
@@ -21,8 +20,9 @@ SOURCE_CHAT_ID = int(os.environ.get("SOURCE_CHAT_ID"))
 DESTINATION_CHAT_ID = int(os.environ.get("DESTINATION_CHAT_ID"))
 
 # --- STATEFUL COUNTERS ---
-daily_counter = START_DAILY_NUM
+# Both counters start at the same value from the history number.
 history_counter = START_HISTORY_NUM
+daily_counter = START_HISTORY_NUM 
 
 # --- TELEGRAM CLIENT & LOCK ---
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
@@ -30,10 +30,11 @@ lock = asyncio.Lock()
 
 def get_template(date, staff_name, daily_num, history_num, location):
     """Creates the new formatted text template."""
+    # The :02 formats the number to have a leading zero if it's less than 10
     return f"""DATE : {date}
 工作员工姓名 STAFF NAME : {staff_name}
-当日编号 NUMBER OF THE DAY: {daily_num}
-历史编号 HISTORY NUMBER : {history_num}
+当日编号 NUMBER OF THE DAY: {daily_num:02}
+历史编号 HISTORY NUMBER : {history_num:02}
 照片所在地区 PHOTO LOCATION: {location}
 """
 
@@ -90,9 +91,11 @@ async def handler(event):
             
             print(f"  -> ✅ Successfully posted History #{history_counter}.")
             
+            # ** FIX: Both counters are now incremented for the next photo **
+            daily_counter += 1
             history_counter += 1
             
-            delay = random.randint(5, 10)
+            delay = random.randint(15, 20)
             print(f"  -> Waiting for {delay} seconds...")
             await asyncio.sleep(delay)
             print(f"--- LOCK RELEASED: Handler complete. ---")
@@ -100,7 +103,7 @@ async def handler(event):
 
 async def main():
     required_vars = ["API_ID", "API_HASH", "TELETHON_SESSION", "SOURCE_CHAT_ID", 
-                     "DESTINATION_CHAT_ID", "DATE", "STAFF_NAME", "PHOTO_LOCATION"]
+                     "DESTINATION_CHAT_ID", "DATE", "STAFF_NAME", "PHOTO_LOCATION", "START_HISTORY_NUM"]
     if not all(os.environ.get(var) for var in required_vars):
         print("🛑 ERROR: One or more required environment variables are missing.")
         return
