@@ -15,11 +15,13 @@ clients = []
 lock = asyncio.Lock()
 
 def get_template(date, staff_name, current_number, location):
-    return f"""DATE : {date}
-工作员工姓名 STAFF NAME : {staff_name}
-当日编号 NUMBER OF THE DAY: {current_number:02}
+    """Creates the new, updated formatted text template."""
+    # The :02 formats the number to have a leading zero if it's less than 10
+    return f"""日期 DATE : {date}
+工作员工姓名STAFF NAME: {staff_name}
+当日编号 NUMBER OF THE DAY : {current_number:02}
 历史编号 HISTORY NUMBER : {current_number:02}
-照片所在地区 PHOTO LOCATION: {location}
+照片所在地区 PHOTO LOCATION:{location}
 """
 
 def create_photo_handler(account_id):
@@ -118,7 +120,7 @@ async def main():
         
         # Add the specific handlers for this client
         client.add_event_handler(create_photo_handler(account_num))
-        client.add_event_handler(command_handler) # The same command handler is added to all clients
+        client.add_event_handler(command_handler)
         clients.append(client)
         account_num += 1
 
