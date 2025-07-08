@@ -2,25 +2,24 @@ import os
 import asyncio
 import random
 import re
+from datetime import datetime
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
 # --- CONFIGURATION ---
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID"))
-# ... other variables are loaded inside the main loop ...
 
 # --- STATE & CLIENTS ---
 bot_states = {}
 clients = []
 lock = asyncio.Lock()
 
-def get_template(date, staff_name, current_number, location):
-    """Creates the new, updated formatted text template."""
-    # The :02 formats the number to have a leading zero if it's less than 10
+def get_template(date, staff_name, daily_num, history_num, location):
+    """Creates the final formatted text template."""
     return f"""日期 DATE : {date}
 工作员工姓名STAFF NAME: {staff_name}
-当日编号 NUMBER OF THE DAY : {current_number:02}
-历史编号 HISTORY NUMBER : {current_number:02}
+当日编号 NUMBER OF THE DAY : {daily_num:02}
+历史编号 HISTORY NUMBER : {history_num:02}
 照片所在地区 PHOTO LOCATION:{location}
 """
 
@@ -31,14 +30,25 @@ def create_photo_handler(account_id):
         if event.message.photo:
             async with lock:
                 state = bot_states[account_id]
-                current_history_num = state['history_counter']
                 
-                print(f"--- ACCOUNT {account_id}: Processing History #{current_history_num} ---")
+                # --- NEW: Automatic Daily Counter Reset Logic ---
+                # Get today's date in YYYY-MM-DD format
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                
+                # If the date has changed, reset the daily counter
+                if today_str != state['last_processed_date']:
+                    print(f"--- ACCOUNT {account_id}: New day detected! Resetting daily counter to 1. ---")
+                    state['daily_counter'] = 1
+                    state['last_processed_date'] = today_str # Update the date
+                # --- END NEW LOGIC ---
+
+                print(f"--- ACCOUNT {account_id}: Processing Daily #{state['daily_counter']}, History #{state['history_counter']} ---")
                 
                 template_text = get_template(
                     state['date'],
                     state['staff_name'],
-                    current_history_num,
+                    state['daily_counter'],
+                    state['history_counter'],
                     state['photo_location']
                 )
                 
@@ -48,8 +58,10 @@ def create_photo_handler(account_id):
                     caption=template_text
                 )
                 
-                print(f"  -> ✅ ACCOUNT {account_id}: Successfully posted History #{current_history_num}.")
+                print(f"  -> ✅ ACCOUNT {account_id}: Successfully posted History #{state['history_counter']}.")
                 
+                # Both counters increment for the next photo
+                state['daily_counter'] += 1
                 state['history_counter'] += 1
                 
                 delay = random.randint(15, 20)
@@ -59,7 +71,6 @@ def create_photo_handler(account_id):
 
     return photo_handler
 
-# This single handler processes all '/set' commands
 @events.register(events.NewMessage(chats=ADMIN_CHAT_ID, pattern=r"/set (\d+) (.+)=(.+)"))
 async def command_handler(event):
     try:
@@ -75,17 +86,15 @@ async def command_handler(event):
         updated = False
         
         if key == "STAFF_NAME":
-            state['staff_name'] = new_value
-            updated = True
+            state['staff_name'] = new_value; updated = True
         elif key == "DATE":
-            state['date'] = new_value
-            updated = True
+            state['date'] = new_value; updated = True
         elif key == "PHOTO_LOCATION":
-            state['photo_location'] = new_value
-            updated = True
+            state['photo_location'] = new_value; updated = True
+        elif key == "START_DAILY_NUM":
+            state['daily_counter'] = int(new_value); updated = True
         elif key == "START_HISTORY_NUM":
-            state['history_counter'] = int(new_value)
-            updated = True
+            state['history_counter'] = int(new_value); updated = True
         
         if updated:
             await event.reply(f"✅ Account {account_id_to_change}: {key} updated to '{new_value}'")
@@ -96,29 +105,30 @@ async def command_handler(event):
         await event.reply(f"🛑 Error processing command: {e}")
 
 async def main():
-    # Loop to find and configure all accounts from environment variables
     account_num = 1
     while True:
+        # Check for essential account variables
         session_str = os.environ.get(f"TELETHON_SESSION_{account_num}")
         api_id = os.environ.get(f"API_ID_{account_num}")
         api_hash = os.environ.get(f"API_HASH_{account_num}")
-        
         if not all([session_str, api_id, api_hash]):
             break
             
         print(f"Found configuration for Account #{account_num}")
         client = TelegramClient(StringSession(session_str), int(api_id), api_hash)
         
+        # Initialize the state for this account
         bot_states[account_num] = {
             'source_id': int(os.environ.get(f"SOURCE_CHAT_ID_{account_num}")),
             'destination_id': int(os.environ.get(f"DESTINATION_CHAT_ID_{account_num}")),
             'date': os.environ.get(f"DATE_{account_num}"),
             'staff_name': os.environ.get(f"STAFF_NAME_{account_num}"),
             'photo_location': os.environ.get(f"PHOTO_LOCATION_{account_num}"),
-            'history_counter': int(os.environ.get(f"START_HISTORY_NUM_{account_num}", 1))
+            'history_counter': int(os.environ.get(f"START_HISTORY_NUM_{account_num}", 1)),
+            'daily_counter': int(os.environ.get(f"START_DAILY_NUM_{account_num}", 1)),
+            'last_processed_date': datetime.now().strftime("%Y-%m-%d") # Store today's date
         }
         
-        # Add the specific handlers for this client
         client.add_event_handler(create_photo_handler(account_num))
         client.add_event_handler(command_handler)
         clients.append(client)
