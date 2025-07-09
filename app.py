@@ -31,16 +31,17 @@ def create_photo_handler(account_id):
             async with lock:
                 state = bot_states[account_id]
                 
-                # --- NEW: Automatic Daily Counter Reset Logic ---
-                # Get today's date in YYYY-MM-DD format
-                today_str = datetime.now().strftime("%Y-%m-%d")
+                # --- NEW: Check if the bot is active ---
+                if not state['is_active']:
+                    print(f"--- ACCOUNT {account_id}: Paused. Ignoring photo. ---")
+                    return # Stop processing if paused
                 
-                # If the date has changed, reset the daily counter
+                # --- Automatic Daily Counter Reset Logic ---
+                today_str = datetime.now().strftime("%Y-%m-%d")
                 if today_str != state['last_processed_date']:
-                    print(f"--- ACCOUNT {account_id}: New day detected! Resetting daily counter to 1. ---")
+                    print(f"--- ACCOUNT {account_id}: New day! Resetting daily counter. ---")
                     state['daily_counter'] = 1
-                    state['last_processed_date'] = today_str # Update the date
-                # --- END NEW LOGIC ---
+                    state['last_processed_date'] = today_str
 
                 print(f"--- ACCOUNT {account_id}: Processing Daily #{state['daily_counter']}, History #{state['history_counter']} ---")
                 
@@ -60,7 +61,6 @@ def create_photo_handler(account_id):
                 
                 print(f"  -> ✅ ACCOUNT {account_id}: Successfully posted History #{state['history_counter']}.")
                 
-                # Both counters increment for the next photo
                 state['daily_counter'] += 1
                 state['history_counter'] += 1
                 
@@ -71,35 +71,65 @@ def create_photo_handler(account_id):
 
     return photo_handler
 
-@events.register(events.NewMessage(chats=ADMIN_CHAT_ID, pattern=r"/set (\d+) (.+)=(.+)"))
+@events.register(events.NewMessage(chats=ADMIN_CHAT_ID))
 async def command_handler(event):
+    """Handles all commands sent to the admin chat."""
     try:
-        account_id_to_change = int(event.pattern_match.group(1))
-        key = event.pattern_match.group(2).strip().upper()
-        new_value = event.pattern_match.group(3).strip()
+        command_text = event.message.text.strip()
+        
+        # --- NEW: Handler for /start and /stop commands ---
+        if command_text.startswith(('/start', '/stop')):
+            parts = command_text.split()
+            if len(parts) != 2 or not parts[1].isdigit():
+                await event.reply("Invalid format. Use `/start <account_number>` or `/stop <account_number>`.")
+                return
+            
+            account_id_to_change = int(parts[1])
+            if account_id_to_change not in bot_states:
+                await event.reply(f"❌ Account ID {account_id_to_change} not found.")
+                return
 
-        if account_id_to_change not in bot_states:
-            await event.reply(f"❌ Account ID {account_id_to_change} not found.")
+            if parts[0] == '/start':
+                bot_states[account_id_to_change]['is_active'] = True
+                await event.reply(f"✅ Account {account_id_to_change} has been **started**.")
+            elif parts[0] == '/stop':
+                bot_states[account_id_to_change]['is_active'] = False
+                await event.reply(f"🛑 Account {account_id_to_change} has been **stopped**.")
             return
 
-        state = bot_states[account_id_to_change]
-        updated = False
-        
-        if key == "STAFF_NAME":
-            state['staff_name'] = new_value; updated = True
-        elif key == "DATE":
-            state['date'] = new_value; updated = True
-        elif key == "PHOTO_LOCATION":
-            state['photo_location'] = new_value; updated = True
-        elif key == "START_DAILY_NUM":
-            state['daily_counter'] = int(new_value); updated = True
-        elif key == "START_HISTORY_NUM":
-            state['history_counter'] = int(new_value); updated = True
-        
-        if updated:
-            await event.reply(f"✅ Account {account_id_to_change}: {key} updated to '{new_value}'")
-        else:
-            await event.reply(f'❌ Unknown setting: {key}')
+        # --- Handler for /set command ---
+        if command_text.startswith('/set'):
+            match = re.match(r"/set (\d+) (.+)=(.+)", command_text)
+            if not match:
+                await event.reply("Invalid format. Use `/set <account_number> VARIABLE=Value`.")
+                return
+
+            account_id_to_change = int(match.group(1))
+            key = match.group(2).strip().upper()
+            new_value = match.group(3).strip()
+
+            if account_id_to_change not in bot_states:
+                await event.reply(f"❌ Account ID {account_id_to_change} not found.")
+                return
+
+            state = bot_states[account_id_to_change]
+            updated = False
+            
+            if key == "STAFF_NAME":
+                state['staff_name'] = new_value; updated = True
+            elif key == "DATE":
+                state['date'] = new_value; updated = True
+            elif key == "PHOTO_LOCATION":
+                state['photo_location'] = new_value; updated = True
+            elif key == "START_DAILY_NUM":
+                state['daily_counter'] = int(new_value); updated = True
+            elif key == "START_HISTORY_NUM":
+                state['history_counter'] = int(new_value); updated = True
+            
+            if updated:
+                await event.reply(f"✅ Account {account_id_to_change}: {key} updated to '{new_value}'")
+            else:
+                await event.reply(f'❌ Unknown setting: {key}')
             
     except Exception as e:
         await event.reply(f"🛑 Error processing command: {e}")
@@ -107,7 +137,6 @@ async def command_handler(event):
 async def main():
     account_num = 1
     while True:
-        # Check for essential account variables
         session_str = os.environ.get(f"TELETHON_SESSION_{account_num}")
         api_id = os.environ.get(f"API_ID_{account_num}")
         api_hash = os.environ.get(f"API_HASH_{account_num}")
@@ -126,7 +155,8 @@ async def main():
             'photo_location': os.environ.get(f"PHOTO_LOCATION_{account_num}"),
             'history_counter': int(os.environ.get(f"START_HISTORY_NUM_{account_num}", 1)),
             'daily_counter': int(os.environ.get(f"START_DAILY_NUM_{account_num}", 1)),
-            'last_processed_date': datetime.now().strftime("%Y-%m-%d") # Store today's date
+            'last_processed_date': datetime.now().strftime("%Y-%m-%d"),
+            'is_active': True # Bots start in an active state by default
         }
         
         client.add_event_handler(create_photo_handler(account_num))
