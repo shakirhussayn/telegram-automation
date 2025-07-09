@@ -7,8 +7,16 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
 # --- CONFIGURATION ---
-# The .strip() method is added to clean up potential copy-paste errors
-ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID").strip())
+# A helper function to safely read and clean integer variables
+def get_int_env(key, default=None):
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    # This removes any character that is NOT a digit or a minus sign
+    cleaned_val = re.sub(r'[^\d-]', '', val)
+    return int(cleaned_val)
+
+ADMIN_CHAT_ID = get_int_env("ADMIN_CHAT_ID")
 
 # --- STATE & CLIENTS ---
 bot_states = {}
@@ -38,7 +46,7 @@ def create_photo_handler(account_id):
                 
                 today_str = datetime.now().strftime("%Y-%m-%d")
                 if today_str != state['last_processed_date']:
-                    print(f"--- ACCOUNT {account_id}: New day detected! Resetting daily counter to 1. ---")
+                    print(f"--- ACCOUNT {account_id}: New day detected! Resetting daily counter. ---")
                     state['daily_counter'] = 1
                     state['last_processed_date'] = today_str
 
@@ -73,6 +81,7 @@ def create_photo_handler(account_id):
 @events.register(events.NewMessage(chats=ADMIN_CHAT_ID, pattern=r"/set (\d+) (.+)=(.+)"))
 async def command_handler(event):
     try:
+        # This handler remains the same
         account_id_to_change = int(event.pattern_match.group(1))
         key = event.pattern_match.group(2).strip().upper()
         new_value = event.pattern_match.group(3).strip()
@@ -115,17 +124,16 @@ async def main():
             
         print(f"Found configuration for Account #{account_num}")
         
-        # The .strip() method is added here to clean the variables
-        client = TelegramClient(StringSession(session_str), int(api_id_str.strip()), api_hash)
+        client = TelegramClient(StringSession(session_str), get_int_env(f"API_ID_{account_num}"), api_hash)
         
         bot_states[account_num] = {
-            'source_id': int(os.environ.get(f"SOURCE_CHAT_ID_{account_num}").strip()),
-            'destination_id': int(os.environ.get(f"DESTINATION_CHAT_ID_{account_num}").strip()),
+            'source_id': get_int_env(f"SOURCE_CHAT_ID_{account_num}"),
+            'destination_id': get_int_env(f"DESTINATION_CHAT_ID_{account_num}"),
             'date': os.environ.get(f"DATE_{account_num}"),
             'staff_name': os.environ.get(f"STAFF_NAME_{account_num}"),
             'photo_location': os.environ.get(f"PHOTO_LOCATION_{account_num}"),
-            'history_counter': int(os.environ.get(f"START_HISTORY_NUM_{account_num}", "1").strip()),
-            'daily_counter': int(os.environ.get(f"START_DAILY_NUM_{account_num}", "1").strip()),
+            'history_counter': get_int_env(f"START_HISTORY_NUM_{account_num}", 1),
+            'daily_counter': get_int_env(f"START_DAILY_NUM_{account_num}", 1),
             'last_processed_date': datetime.now().strftime("%Y-%m-%d"),
             'is_active': True
         }
