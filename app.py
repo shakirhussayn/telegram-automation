@@ -6,18 +6,6 @@ from datetime import datetime
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# --- CONFIGURATION ---
-# A helper function to safely read and clean integer variables
-def get_int_env(key, default=None):
-    val = os.environ.get(key)
-    if val is None:
-        return default
-    # This removes any character that is NOT a digit or a minus sign
-    cleaned_val = re.sub(r'[^\d-]', '', val)
-    return int(cleaned_val)
-
-ADMIN_CHAT_ID = get_int_env("ADMIN_CHAT_ID")
-
 # --- STATE & CLIENTS ---
 bot_states = {}
 clients = []
@@ -78,57 +66,79 @@ def create_photo_handler(account_id):
 
     return photo_handler
 
-@events.register(events.NewMessage(chats=ADMIN_CHAT_ID, pattern=r"/set (\d+) (.+)=(.+)"))
-async def command_handler(event):
-    try:
-        # This handler remains the same
-        account_id_to_change = int(event.pattern_match.group(1))
-        key = event.pattern_match.group(2).strip().upper()
-        new_value = event.pattern_match.group(3).strip()
-
-        if account_id_to_change not in bot_states:
-            await event.reply(f"❌ Account ID {account_id_to_change} not found.")
-            return
-
-        state = bot_states[account_id_to_change]
-        updated = False
-        
-        if key == "STAFF_NAME":
-            state['staff_name'] = new_value; updated = True
-        elif key == "DATE":
-            state['date'] = new_value; updated = True
-        elif key == "PHOTO_LOCATION":
-            state['photo_location'] = new_value; updated = True
-        elif key == "START_DAILY_NUM":
-            state['daily_counter'] = int(new_value); updated = True
-        elif key == "START_HISTORY_NUM":
-            state['history_counter'] = int(new_value); updated = True
-        
-        if updated:
-            await event.reply(f"✅ Account {account_id_to_change}: {key} updated to '{new_value}'")
-        else:
-            await event.reply(f'❌ Unknown setting: {key}')
+def create_command_handler(account_id):
+    """Creates a unique command handler for each account that listens only in its own admin chat."""
+    @events.register(events.NewMessage(chats=bot_states[account_id]['admin_id']))
+    async def command_handler(event):
+        try:
+            command_text = event.message.text.strip()
+            state = bot_states[account_id]
             
-    except Exception as e:
-        await event.reply(f"🛑 Error processing command: {e}")
+            # Simplified /start and /stop commands
+            if command_text.lower() == '/start':
+                state['is_active'] = True
+                await event.reply(f"✅ Account {account_id} has been **started**.")
+                return
+            elif command_text.lower() == '/stop':
+                state['is_active'] = False
+                await event.reply(f"🛑 Account {account_id} has been **stopped**.")
+                return
+
+            # Simplified /set command
+            if command_text.startswith('/set'):
+                match = re.match(r"/set (.+)=(.+)", command_text, re.IGNORECASE)
+                if not match:
+                    await event.reply("Invalid format. Use `/set VARIABLE=Value`.")
+                    return
+
+                key = match.group(1).strip().upper()
+                new_value = match.group(2).strip()
+                updated = False
+                
+                if key == "STAFF_NAME":
+                    state['staff_name'] = new_value; updated = True
+                elif key == "DATE":
+                    state['date'] = new_value; updated = True
+                elif key == "PHOTO_LOCATION":
+                    state['photo_location'] = new_value; updated = True
+                elif key == "START_DAILY_NUM":
+                    state['daily_counter'] = int(new_value); updated = True
+                elif key == "START_HISTORY_NUM":
+                    state['history_counter'] = int(new_value); updated = True
+                
+                if updated:
+                    await event.reply(f"✅ Account {account_id}: {key} updated to '{new_value}'")
+                else:
+                    await event.reply(f'❌ Unknown setting: {key}')
+                
+        except Exception as e:
+            await event.reply(f"🛑 Error processing command: {e}")
+            
+    return command_handler
 
 async def main():
+    # A helper function to safely read and clean integer variables
+    def get_int_env(key, default=None):
+        val = os.environ.get(key)
+        if val is None: return default
+        return int(re.sub(r'[^\d-]', '', val))
+
     account_num = 1
     while True:
         session_str = os.environ.get(f"TELETHON_SESSION_{account_num}")
-        api_id_str = os.environ.get(f"API_ID_{account_num}")
+        api_id = get_int_env(f"API_ID_{account_num}")
         api_hash = os.environ.get(f"API_HASH_{account_num}")
         
-        if not all([session_str, api_id_str, api_hash]):
+        if not all([session_str, api_id, api_hash]):
             break
             
         print(f"Found configuration for Account #{account_num}")
-        
-        client = TelegramClient(StringSession(session_str), get_int_env(f"API_ID_{account_num}"), api_hash)
+        client = TelegramClient(StringSession(session_str), api_id, api_hash)
         
         bot_states[account_num] = {
             'source_id': get_int_env(f"SOURCE_CHAT_ID_{account_num}"),
             'destination_id': get_int_env(f"DESTINATION_CHAT_ID_{account_num}"),
+            'admin_id': get_int_env(f"ADMIN_CHAT_ID_{account_num}"),
             'date': os.environ.get(f"DATE_{account_num}"),
             'staff_name': os.environ.get(f"STAFF_NAME_{account_num}"),
             'photo_location': os.environ.get(f"PHOTO_LOCATION_{account_num}"),
@@ -138,8 +148,12 @@ async def main():
             'is_active': True
         }
         
+        print(f"--- Loaded Settings for Account #{account_num} ---")
+        print(f"  -> Listening for Photos in: {bot_states[account_num]['source_id']}")
+        print(f"  -> Listening for Commands in: {bot_states[account_num]['admin_id']}")
+        
         client.add_event_handler(create_photo_handler(account_num))
-        client.add_event_handler(command_handler)
+        client.add_event_handler(create_command_handler(account_num))
         clients.append(client)
         account_num += 1
 
