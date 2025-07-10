@@ -6,6 +6,9 @@ from datetime import datetime
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
+# --- CONFIGURATION ---
+ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID"))
+
 # --- STATE & CLIENTS ---
 bot_states = {}
 clients = []
@@ -59,7 +62,8 @@ def create_photo_handler(account_id):
                 state['daily_counter'] += 1
                 state['history_counter'] += 1
                 
-                delay = random.randint(15, 20)
+                # The delay is now updated to 10-15 seconds
+                delay = random.randint(10, 15)
                 print(f"  -> ACCOUNT {account_id}: Waiting for {delay} seconds...")
                 await asyncio.sleep(delay)
                 print(f"--- ACCOUNT {account_id}: Handler complete. ---")
@@ -74,7 +78,6 @@ def create_command_handler(account_id):
             command_text = event.message.text.strip()
             state = bot_states[account_id]
             
-            # Simplified /start and /stop commands
             if command_text.lower() == '/start':
                 state['is_active'] = True
                 await event.reply(f"✅ Account {account_id} has been **started**.")
@@ -84,7 +87,6 @@ def create_command_handler(account_id):
                 await event.reply(f"🛑 Account {account_id} has been **stopped**.")
                 return
 
-            # Simplified /set command
             if command_text.startswith('/set'):
                 match = re.match(r"/set (.+)=(.+)", command_text, re.IGNORECASE)
                 if not match:
