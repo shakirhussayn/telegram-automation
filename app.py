@@ -63,7 +63,7 @@ def create_photo_handler(account_id):
                 state['history_counter'] += 1
                 
                 # The delay is now updated to 10-15 seconds
-                delay = random.randint(10, 15)
+                delay = random.randint(10, 13)
                 print(f"  -> ACCOUNT {account_id}: Waiting for {delay} seconds...")
                 await asyncio.sleep(delay)
                 print(f"--- ACCOUNT {account_id}: Handler complete. ---")
